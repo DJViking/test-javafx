@@ -1,0 +1,113 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.0.8'
+    id 'de.undercouch.download' version '4.0.0'
+}
+
+sourceCompatibility = '11'
+targetCompatibility = '11'
+
+mainClassName = 'test.javafx.App'
+
+repositories {
+    jcenter()
+}
+
+application {
+    mainClassName = 'test.javafx.App'
+}
+
+javafx {
+    version = "11.0.2"
+    modules = [
+        'javafx.controls',
+        'javafx.fxml',
+        'javafx.graphics',
+        'javafx.media',
+        'javafx.web',
+        'javafx.swing'
+    ]
+}
+
+/* Store the jmods archive in User Gradle Home. */
+task downloadJmods(type: Download) {
+    def fileName = "openjfx-11.0.2_linux-x64_bin-jmods.zip"
+    def outputFile = file("${buildDir}/${fileName}")
+    outputs.file(outputFile).withPropertyName("outputFile")
+
+    src "https://download2.gluonhq.com/openjfx/11.0.2/${fileName}"
+    dest outputFile
+    overwrite false
+}
+
+task downloadAndUnpackJmods(type: Copy) {
+    dependsOn downloadJmods
+
+    def inputFile = file(downloadJmods.dest)
+    inputs.file(inputFile).withPropertyName("inputFile")
+
+    from zipTree(inputFile.path)
+    into buildDir
+}
+
+task createRuntime(type: Exec) {
+    dependsOn downloadAndUnpackJmods
+
+    def outputDir = file("${buildDir}/runtime")
+    outputs.dir(outputDir).withPropertyName("outputDir")
+
+    def jmodsDir = file(downloadAndUnpackJmods.outputs.files.singleFile.path + '/javafx-jmods-11.0.2')
+
+    doFirst {
+        delete outputDir
+    }
+
+    executable = "jlink"
+
+    args = [
+        '--module-path', jmodsDir.path,
+        '--add-modules', 'java.base,java.sql,java.desktop,java.logging,java.scripting,javafx.base,javafx.controls,javafx.graphics,javafx.fxml,javafx.media,javafx.web,javafx.swing',
+        '--bind-services',
+        '--no-header-files',
+        '--no-man-pages',
+        '--compress=2',
+        '--strip-debug',
+        '--output', outputDir.path
+    ]
+}
+
+task createNative(type: Exec) {
+    dependsOn installDist
+    dependsOn createRuntime
+
+    def inputDir = file(installDist.outputs.files.singleFile.path + "/lib")
+    inputs.dir(inputDir)
+
+    def runtimeImageDir = createRuntime.outputs.files.singleFile
+    inputs.dir(runtimeImageDir)
+
+    def outputDir = file("${buildDir}/native")
+    outputs.dir(outputDir)
+
+    doFirst {
+        delete outputDir
+    }
+
+    executable = "jpackage"
+
+    args = [
+        "--verbose",
+        "--name", project.name,
+        "--app-version", "1.0.0",
+        "--vendor", "test.javafx",
+        "--main-class", project.mainClassName,
+        "--main-jar", jar.archiveName,
+        "--java-options", "-Xmx2g",
+        "--java-options", "-Dprism.order=sw",
+        "--runtime-image", runtimeImageDir.path,
+        "--arguments", "--log-level=ALL",
+        "--input", inputDir.path,
+        "--output", outputDir.path
+    ]
+}
